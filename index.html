@@ -171,35 +171,7 @@
             padding: 40px;
             color: #999;
         }
-        .expand-btn {
-            background: #007bff;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-            margin-top: 10px;
-        }
-        .expand-btn:hover {
-            background: #0056b3;
-        }
-        .collapsed {
-            max-height: 200px;
-            overflow: hidden;
-            position: relative;
-        }
-        .collapsed::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            height: 50px;
-            background: linear-gradient(transparent, white);
-        }
         
-        /* Markdown styling */
         .markdown-content h1, .markdown-content h2, .markdown-content h3 {
             color: #2c3e50;
             margin-top: 1em;
@@ -227,6 +199,21 @@
         }
         .markdown-content li {
             margin-bottom: 0.3em;
+        }
+        /* Enhanced subscript and superscript styling */
+        .markdown-content sub {
+            font-size: 0.75em;
+            line-height: 0;
+            position: relative;
+            vertical-align: baseline;
+            bottom: -0.25em;
+        }
+        .markdown-content sup {
+            font-size: 0.75em;
+            line-height: 0;
+            position: relative;
+            vertical-align: baseline;
+            top: -0.5em;
         }
     </style>
 </head>
@@ -352,7 +339,15 @@
         function renderMarkdown(text) {
             if (!text) return '';
             try {
-                return marked.parse(text);
+                // First, convert custom markdown sequences
+                let processedText = text
+                    // Convert _x_ to subscript (HTML <sub>)
+                    .replace(/_([^_]+)_/g, '<sub>$1</sub>')
+                    // Convert ^x^ to superscript (HTML <sup>)
+                    .replace(/\^([^^]+)\^/g, '<sup>$1</sup>');
+                
+                // Then apply standard markdown parsing
+                return marked.parse(processedText);
             } catch (error) {
                 console.error('Markdown parsing error:', error);
                 return text; // Fallback to plain text
@@ -423,20 +418,28 @@
             `).join('');
         }
 
-        // Render other arrays (cross-references, spellings, subordinate entries)
+        // Render other arrays (cross-references, spellings, subordinate entries) - FIXED
         function renderOtherArrays(array, title, className) {
             if (!array || array.length === 0) return '';
             
             return `
                 <div class="content-section">
                     <div class="content-title">${title} (${array.length}):</div>
-                    ${array.map(item => `
-                        <div class="${className}">
-                            ${typeof item === 'string' ? item : 
-                              item.content ? renderContentArray([item]) :
-                              JSON.stringify(item)}
-                        </div>
-                    `).join('')}
+                    ${array.map(item => {
+                        if (typeof item === 'string') {
+                            return `<div class="${className}">${item}</div>`;
+                        } else if (item && typeof item === 'object') {
+                            if (item.content) {
+                                return renderContentArray([item]);
+                            } else {
+                                // Handle object properly - convert to readable format
+                                const displayText = item.lemma || item.text || item.reference || JSON.stringify(item);
+                                return `<div class="${className}">${displayText}</div>`;
+                            }
+                        } else {
+                            return `<div class="${className}">N/A</div>`;
+                        }
+                    }).join('')}
                 </div>
             `;
         }
@@ -511,7 +514,7 @@
             displayResults(currentResults);
         }
 
-        // Display search results with full entry
+        // Display search results with full entry - REMOVED EXPAND/COLLAPSE
         function displayResults(results) {
             const resultsContainer = document.getElementById('results');
             const resultsInfo = document.getElementById('resultsInfo');
@@ -525,7 +528,6 @@
 
             resultsContainer.innerHTML = results.map((result, index) => {
                 const entry = result.entry;
-                const entryId = `entry-${index}`;
                 
                 return `
                     <div class="result-card">
@@ -538,43 +540,22 @@
                             ${entry.translation_german ? `<div class="translation-row"><span class="translation-label">German:</span> ${entry.translation_german}</div>` : ''}
                         </div>
 
-                        <div id="${entryId}" class="collapsed">
-                            ${renderContentArray(entry.content_general, 'General Content')}
+                        ${renderContentArray(entry.content_general, 'General Content')}
 
-                            ${entry.composites && entry.composites.length > 0 ? `
-                                <div class="content-section">
-                                    <div class="content-title">Composites (${entry.composites.length}):</div>
-                                    ${renderComposites(entry.composites)}
-                                </div>
-                            ` : ''}
+                        ${entry.composites && entry.composites.length > 0 ? `
+                            <div class="content-section">
+                                <div class="content-title">Composites (${entry.composites.length}):</div>
+                                ${renderComposites(entry.composites)}
+                            </div>
+                        ` : ''}
 
-                            ${renderOtherArrays(entry.non_standard_spellings, 'Non-standard Spellings', 'spelling-item')}
-                            ${renderOtherArrays(entry.cross_references, 'Cross References', 'cross-ref-item')}
-                            ${renderOtherArrays(entry.subordinate_entries, 'Subordinate Entries', 'subordinate-item')}
-                        </div>
-
-                        <button class="expand-btn" onclick="toggleExpand('${entryId}', this)">Show Full Entry</button>
+                        ${renderOtherArrays(entry.non_standard_spellings, 'Non-standard Spellings', 'spelling-item')}
+                        ${renderOtherArrays(entry.cross_references, 'Cross References', 'cross-ref-item')}
+                        ${renderOtherArrays(entry.subordinate_entries, 'Subordinate Entries', 'subordinate-item')}
                     </div>
                 `;
             }).join('');
         }
-
-        // Toggle expand/collapse
-        function toggleExpand(entryId, button) {
-            const content = document.getElementById(entryId);
-            const isCollapsed = content.classList.contains('collapsed');
-            
-            if (isCollapsed) {
-                content.classList.remove('collapsed');
-                button.textContent = 'Show Less';
-            } else {
-                content.classList.add('collapsed');
-                button.textContent = 'Show Full Entry';
-            }
-        }
-
-        // Make toggleExpand globally available
-        window.toggleExpand = toggleExpand;
 
         // Generate suggestions
         function generateSuggestions(query) {
