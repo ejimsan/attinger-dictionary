@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Attinger Dictionary Search</title>
     <script src="https://unpkg.com/lunr/lunr.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -106,6 +107,59 @@
             font-weight: bold;
             color: #2c3e50;
             margin-bottom: 8px;
+            font-size: 16px;
+        }
+        .content-subsection {
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+        .content-item {
+            margin-bottom: 8px;
+            padding: 5px;
+            background-color: white;
+            border-radius: 3px;
+            border-left: 3px solid #e9ecef;
+        }
+        .content-item-type {
+            font-size: 12px;
+            color: #6c757d;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        .content-item-text {
+            line-height: 1.4;
+        }
+        .composite-item {
+            margin-bottom: 12px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .composite-lemma {
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 5px;
+        }
+        .composite-translations {
+            margin-bottom: 8px;
+        }
+        .subordinate-composite {
+            margin-left: 20px;
+            margin-top: 8px;
+            padding: 8px;
+            background-color: #e9ecef;
+            border-radius: 3px;
+            border-left: 3px solid #28a745;
+        }
+        .cross-ref-item, .spelling-item, .subordinate-item {
+            margin-bottom: 8px;
+            padding: 8px;
+            background-color: #fff3cd;
+            border-radius: 3px;
+            border-left: 3px solid #ffc107;
         }
         .loading {
             text-align: center;
@@ -116,6 +170,63 @@
             text-align: center;
             padding: 40px;
             color: #999;
+        }
+        .expand-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+        .expand-btn:hover {
+            background: #0056b3;
+        }
+        .collapsed {
+            max-height: 200px;
+            overflow: hidden;
+            position: relative;
+        }
+        .collapsed::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: linear-gradient(transparent, white);
+        }
+        
+        /* Markdown styling */
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            color: #2c3e50;
+            margin-top: 1em;
+            margin-bottom: 0.5em;
+        }
+        .markdown-content p {
+            margin-bottom: 0.8em;
+            line-height: 1.5;
+        }
+        .markdown-content strong {
+            font-weight: bold;
+        }
+        .markdown-content em {
+            font-style: italic;
+        }
+        .markdown-content code {
+            background-color: #f4f4f4;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        .markdown-content ul, .markdown-content ol {
+            margin-bottom: 0.8em;
+            padding-left: 1.5em;
+        }
+        .markdown-content li {
+            margin-bottom: 0.3em;
         }
     </style>
 </head>
@@ -163,7 +274,7 @@
                 document.getElementById('loading').style.display = 'block';
                 
                 // Adjust path based on where your JSON file is located
-                const response = await fetch('./attinger.json');
+                const response = await fetch('./attinger-dictionary/attinger.json');
                 dictionaryData = await response.json();
                 
                 // Filter out empty entries
@@ -237,6 +348,99 @@
             });
         }
 
+        // Render markdown content
+        function renderMarkdown(text) {
+            if (!text) return '';
+            try {
+                return marked.parse(text);
+            } catch (error) {
+                console.error('Markdown parsing error:', error);
+                return text; // Fallback to plain text
+            }
+        }
+
+        // Render content array
+        function renderContentArray(contentArray, title = '') {
+            if (!contentArray || contentArray.length === 0) return '';
+            
+            return `
+                <div class="content-subsection">
+                    ${title ? `<div class="content-title">${title}</div>` : ''}
+                    ${contentArray.map(item => `
+                        <div class="content-item">
+                            <div class="content-item-type">${item.type || 'GENERAL'}</div>
+                            <div class="content-item-text markdown-content">${renderMarkdown(item.content || '')}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        // Render composites
+        function renderComposites(composites) {
+            if (!composites || composites.length === 0) return '';
+            
+            return composites.map(comp => `
+                <div class="composite-item">
+                    <div class="composite-lemma">${comp.lemma || 'N/A'}</div>
+                    ${comp.pos_french || comp.pos ? `<div class="pos-info">${comp.pos || ''} ${comp.pos_french ? `(${comp.pos_french})` : ''}</div>` : ''}
+                    
+                    <div class="composite-translations">
+                        ${comp.translation_french ? `<div class="translation-row"><span class="translation-label">French:</span> ${comp.translation_french}</div>` : ''}
+                        ${comp.translation_english ? `<div class="translation-row"><span class="translation-label">English:</span> ${comp.translation_english}</div>` : ''}
+                        ${comp.translation_german ? `<div class="translation-row"><span class="translation-label">German:</span> ${comp.translation_german}</div>` : ''}
+                    </div>
+
+                    ${renderContentArray(comp.content, 'Content')}
+
+                    ${comp.subordinate_composites && comp.subordinate_composites.length > 0 ? `
+                        <div class="content-title">Subordinate Composites:</div>
+                        ${comp.subordinate_composites.map(subComp => `
+                            <div class="subordinate-composite">
+                                <div class="composite-lemma">${subComp.lemma || 'N/A'}</div>
+                                ${subComp.pos_french || subComp.pos ? `<div class="pos-info">${subComp.pos || ''} ${subComp.pos_french ? `(${subComp.pos_french})` : ''}</div>` : ''}
+                                <div class="composite-translations">
+                                    ${subComp.translation_french ? `<div><strong>French:</strong> ${subComp.translation_french}</div>` : ''}
+                                    ${subComp.translation_english ? `<div><strong>English:</strong> ${subComp.translation_english}</div>` : ''}
+                                    ${subComp.translation_german ? `<div><strong>German:</strong> ${subComp.translation_german}</div>` : ''}
+                                </div>
+                                ${renderContentArray(subComp.content)}
+                                ${subComp.subordinate_composites && subComp.subordinate_composites.length > 0 ? `
+                                    <div style="margin-left: 15px; margin-top: 8px;">
+                                        ${subComp.subordinate_composites.map(subSubComp => `
+                                            <div class="subordinate-composite">
+                                                <strong>${subSubComp.lemma || 'N/A'}</strong>
+                                                ${subSubComp.translation_french ? ` - ${subSubComp.translation_french}` : ''}
+                                                ${renderContentArray(subSubComp.content)}
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    ` : ''}
+                </div>
+            `).join('');
+        }
+
+        // Render other arrays (cross-references, spellings, subordinate entries)
+        function renderOtherArrays(array, title, className) {
+            if (!array || array.length === 0) return '';
+            
+            return `
+                <div class="content-section">
+                    <div class="content-title">${title} (${array.length}):</div>
+                    ${array.map(item => `
+                        <div class="${className}">
+                            ${typeof item === 'string' ? item : 
+                              item.content ? renderContentArray([item]) :
+                              JSON.stringify(item)}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
         // Search function
         function performSearch(query) {
             if (!query.trim() || !searchIndex) {
@@ -307,7 +511,7 @@
             displayResults(currentResults);
         }
 
-        // Display search results
+        // Display search results with full entry
         function displayResults(results) {
             const resultsContainer = document.getElementById('results');
             const resultsInfo = document.getElementById('resultsInfo');
@@ -319,8 +523,10 @@
                 return;
             }
 
-            resultsContainer.innerHTML = results.map(result => {
+            resultsContainer.innerHTML = results.map((result, index) => {
                 const entry = result.entry;
+                const entryId = `entry-${index}`;
+                
                 return `
                     <div class="result-card">
                         <div class="lemma">${entry.lemma || 'N/A'}</div>
@@ -332,19 +538,43 @@
                             ${entry.translation_german ? `<div class="translation-row"><span class="translation-label">German:</span> ${entry.translation_german}</div>` : ''}
                         </div>
 
-                        ${entry.composites && entry.composites.length > 0 ? `
-                            <div class="content-section">
-                                <div class="content-title">Composites (${entry.composites.length}):</div>
-                                ${entry.composites.slice(0, 3).map(comp => 
-                                    `<div>• ${comp.lemma || ''} ${comp.translation_french ? `«${comp.translation_french}»` : ''}</div>`
-                                ).join('')}
-                                ${entry.composites.length > 3 ? '<div>... and more</div>' : ''}
-                            </div>
-                        ` : ''}
+                        <div id="${entryId}" class="collapsed">
+                            ${renderContentArray(entry.content_general, 'General Content')}
+
+                            ${entry.composites && entry.composites.length > 0 ? `
+                                <div class="content-section">
+                                    <div class="content-title">Composites (${entry.composites.length}):</div>
+                                    ${renderComposites(entry.composites)}
+                                </div>
+                            ` : ''}
+
+                            ${renderOtherArrays(entry.non_standard_spellings, 'Non-standard Spellings', 'spelling-item')}
+                            ${renderOtherArrays(entry.cross_references, 'Cross References', 'cross-ref-item')}
+                            ${renderOtherArrays(entry.subordinate_entries, 'Subordinate Entries', 'subordinate-item')}
+                        </div>
+
+                        <button class="expand-btn" onclick="toggleExpand('${entryId}', this)">Show Full Entry</button>
                     </div>
                 `;
             }).join('');
         }
+
+        // Toggle expand/collapse
+        function toggleExpand(entryId, button) {
+            const content = document.getElementById(entryId);
+            const isCollapsed = content.classList.contains('collapsed');
+            
+            if (isCollapsed) {
+                content.classList.remove('collapsed');
+                button.textContent = 'Show Less';
+            } else {
+                content.classList.add('collapsed');
+                button.textContent = 'Show Full Entry';
+            }
+        }
+
+        // Make toggleExpand globally available
+        window.toggleExpand = toggleExpand;
 
         // Generate suggestions
         function generateSuggestions(query) {
