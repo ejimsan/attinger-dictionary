@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attinger Dictionary Search</title>
+    <script src="https://unpkg.com/lunr/lunr.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .search-container {
+            position: relative;
+            margin-bottom: 30px;
+        }
+        #searchInput {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            box-sizing: border-box;
+        }
+        #suggestions {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #ddd;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+        }
+        .suggestion {
+            padding: 10px 15px;
+            cursor: pointer;
+            border-bottom: 1px solid #eee;
+        }
+        .suggestion:hover {
+            background-color: #f0f0f0;
+        }
+        .filters {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .results-info {
+            margin-bottom: 15px;
+            color: #666;
+        }
+        .result-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .lemma {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        .pos-info {
+            color: #7f8c8d;
+            margin-bottom: 12px;
+            font-style: italic;
+        }
+        .translations {
+            margin-bottom: 15px;
+        }
+        .translation-row {
+            margin-bottom: 5px;
+        }
+        .translation-label {
+            font-weight: bold;
+            color: #34495e;
+            display: inline-block;
+            width: 80px;
+        }
+        .content-section {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        .content-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 8px;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Attinger Dictionary</h1>
+        <p>Search through Sumerian-French-English-German dictionary entries</p>
+    </div>
+
+    <div class="search-container">
+        <input type="text" id="searchInput" placeholder="Search lemma, translations, or content..." autocomplete="off">
+        <div id="suggestions"></div>
+    </div>
+
+    <div class="filters">
+        <div class="filter-group">
+            <label for="posFilter">POS:</label>
+            <select id="posFilter">
+                <option value="">All</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label for="searchField">Search in:</label>
+            <select id="searchField">
+                <option value="all">All fields</option>
+                <option value="lemma">Lemma only</option>
+                <option value="translations">Translations only</option>
+                <option value="content">Content only</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="resultsInfo" class="results-info"></div>
+    <div id="results"></div>
+    <div id="loading" class="loading" style="display: none;">Loading dictionary...</div>
+
+    <script>
+        let dictionaryData = [];
+        let searchIndex = null;
+        let currentResults = [];
+
+        // Load the JSON data
+        async function loadData() {
+            try {
+                document.getElementById('loading').style.display = 'block';
+                
+                // Adjust path based on where your JSON file is located
+                const response = await fetch('./attinger-dictionary/attinger.json');
+                dictionaryData = await response.json();
+                
+                // Filter out empty entries
+                dictionaryData = dictionaryData.filter(entry => 
+                    entry.lemma || entry.translation_french || entry.translation_english
+                );
+                
+                buildSearchIndex();
+                populatePOSFilter();
+                document.getElementById('loading').style.display = 'none';
+                
+                console.log(`Loaded ${dictionaryData.length} dictionary entries`);
+            } catch (error) {
+                console.error('Error loading data:', error);
+                document.getElementById('loading').innerHTML = 'Error loading dictionary data. Please check the file path.';
+            }
+        }
+
+        // Build Lunr search index
+        function buildSearchIndex() {
+            searchIndex = lunr(function () {
+                this.ref('id');
+                this.field('lemma', { boost: 10 });
+                this.field('translation_french', { boost: 8 });
+                this.field('translation_english', { boost: 8 });
+                this.field('translation_german', { boost: 8 });
+                this.field('pos');
+                this.field('content');
+
+                dictionaryData.forEach((entry, index) => {
+                    // Extract content text from content arrays
+                    let contentText = '';
+                    if (entry.content_general) {
+                        contentText += entry.content_general.map(c => c.content || '').join(' ');
+                    }
+                    if (entry.composites) {
+                        entry.composites.forEach(comp => {
+                            contentText += ` ${comp.lemma || ''} ${comp.translation_french || ''}`;
+                            if (comp.content) {
+                                contentText += comp.content.map(c => c.content || '').join(' ');
+                            }
+                        });
+                    }
+
+                    this.add({
+                        id: index,
+                        lemma: entry.lemma || '',
+                        translation_french: entry.translation_french || '',
+                        translation_english: entry.translation_english || '',
+                        translation_german: entry.translation_german || '',
+                        pos: entry.pos || '',
+                        content: contentText
+                    });
+                });
+            });
+        }
+
+        // Populate POS filter dropdown
+        function populatePOSFilter() {
+            const posSet = new Set();
+            dictionaryData.forEach(entry => {
+                if (entry.pos) posSet.add(entry.pos);
+            });
+            
+            const posFilter = document.getElementById('posFilter');
+            Array.from(posSet).sort().forEach(pos => {
+                const option = document.createElement('option');
+                option.value = pos;
+                option.textContent = pos;
+                posFilter.appendChild(option);
+            });
+        }
+
+        // Search function
+        function performSearch(query) {
+            if (!query.trim() || !searchIndex) {
+                displayResults([]);
+                return;
+            }
+
+            const searchField = document.getElementById('searchField').value;
+            const posFilter = document.getElementById('posFilter').value;
+
+            try {
+                let searchQuery = query;
+                
+                // Field-specific search
+                if (searchField !== 'all') {
+                    searchQuery = `${searchField}:${query}`;
+                }
+
+                const results = searchIndex.search(searchQuery);
+                
+                // Get actual entries and apply POS filter
+                currentResults = results
+                    .map(result => ({
+                        entry: dictionaryData[result.ref],
+                        score: result.score
+                    }))
+                    .filter(result => !posFilter || result.entry.pos === posFilter)
+                    .slice(0, 50); // Limit results
+
+                displayResults(currentResults);
+            } catch (error) {
+                console.error('Search error:', error);
+                // Fallback to simple text search
+                performSimpleSearch(query);
+            }
+        }
+
+        // Fallback simple search
+        function performSimpleSearch(query) {
+            const searchField = document.getElementById('searchField').value;
+            const posFilter = document.getElementById('posFilter').value;
+            const queryLower = query.toLowerCase();
+
+            currentResults = dictionaryData
+                .map((entry, index) => {
+                    let score = 0;
+                    const lemma = (entry.lemma || '').toLowerCase();
+                    const frTranslation = (entry.translation_french || '').toLowerCase();
+                    const enTranslation = (entry.translation_english || '').toLowerCase();
+                    const deTranslation = (entry.translation_german || '').toLowerCase();
+
+                    // Calculate relevance score
+                    if (searchField === 'all' || searchField === 'lemma') {
+                        if (lemma.includes(queryLower)) score += lemma.startsWith(queryLower) ? 10 : 5;
+                    }
+                    if (searchField === 'all' || searchField === 'translations') {
+                        if (frTranslation.includes(queryLower)) score += 3;
+                        if (enTranslation.includes(queryLower)) score += 3;
+                        if (deTranslation.includes(queryLower)) score += 3;
+                    }
+
+                    return score > 0 ? { entry, score } : null;
+                })
+                .filter(result => result && (!posFilter || result.entry.pos === posFilter))
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 50);
+
+            displayResults(currentResults);
+        }
+
+        // Display search results
+        function displayResults(results) {
+            const resultsContainer = document.getElementById('results');
+            const resultsInfo = document.getElementById('resultsInfo');
+
+            resultsInfo.textContent = `Found ${results.length} result${results.length !== 1 ? 's' : ''}`;
+
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<div class="no-results">No results found. Try different search terms.</div>';
+                return;
+            }
+
+            resultsContainer.innerHTML = results.map(result => {
+                const entry = result.entry;
+                return `
+                    <div class="result-card">
+                        <div class="lemma">${entry.lemma || 'N/A'}</div>
+                        <div class="pos-info">${entry.pos || ''} ${entry.pos_french ? `(${entry.pos_french})` : ''}</div>
+                        
+                        <div class="translations">
+                            ${entry.translation_french ? `<div class="translation-row"><span class="translation-label">French:</span> ${entry.translation_french}</div>` : ''}
+                            ${entry.translation_english ? `<div class="translation-row"><span class="translation-label">English:</span> ${entry.translation_english}</div>` : ''}
+                            ${entry.translation_german ? `<div class="translation-row"><span class="translation-label">German:</span> ${entry.translation_german}</div>` : ''}
+                        </div>
+
+                        ${entry.composites && entry.composites.length > 0 ? `
+                            <div class="content-section">
+                                <div class="content-title">Composites (${entry.composites.length}):</div>
+                                ${entry.composites.slice(0, 3).map(comp => 
+                                    `<div>• ${comp.lemma || ''} ${comp.translation_french ? `«${comp.translation_french}»` : ''}</div>`
+                                ).join('')}
+                                ${entry.composites.length > 3 ? '<div>... and more</div>' : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Generate suggestions
+        function generateSuggestions(query) {
+            if (!query || query.length < 2) {
+                hideSuggestions();
+                return;
+            }
+
+            const queryLower = query.toLowerCase();
+            const suggestions = dictionaryData
+                .filter(entry => entry.lemma && entry.lemma.toLowerCase().startsWith(queryLower))
+                .map(entry => entry.lemma)
+                .filter((lemma, index, arr) => arr.indexOf(lemma) === index) // Remove duplicates
+                .slice(0, 8);
+
+            showSuggestions(suggestions);
+        }
+
+        function showSuggestions(suggestions) {
+            const suggestionsContainer = document.getElementById('suggestions');
+            
+            if (suggestions.length === 0) {
+                hideSuggestions();
+                return;
+            }
+
+            suggestionsContainer.innerHTML = suggestions
+                .map(suggestion => `<div class="suggestion">${suggestion}</div>`)
+                .join('');
+            
+            suggestionsContainer.style.display = 'block';
+
+            // Add click handlers
+            suggestionsContainer.querySelectorAll('.suggestion').forEach(elem => {
+                elem.addEventListener('click', () => {
+                    document.getElementById('searchInput').value = elem.textContent;
+                    hideSuggestions();
+                    performSearch(elem.textContent);
+                });
+            });
+        }
+
+        function hideSuggestions() {
+            document.getElementById('suggestions').style.display = 'none';
+        }
+
+        // Event listeners
+        document.getElementById('searchInput').addEventListener('input', (e) => {
+            const query = e.target.value;
+            generateSuggestions(query);
+            
+            // Debounce search
+            clearTimeout(window.searchTimeout);
+            window.searchTimeout = setTimeout(() => performSearch(query), 300);
+        });
+
+        document.getElementById('searchInput').addEventListener('blur', () => {
+            // Hide suggestions after a short delay to allow clicks
+            setTimeout(hideSuggestions, 200);
+        });
+
+        document.getElementById('posFilter').addEventListener('change', () => {
+            const query = document.getElementById('searchInput').value;
+            if (query) performSearch(query);
+        });
+
+        document.getElementById('searchField').addEventListener('change', () => {
+            const query = document.getElementById('searchInput').value;
+            if (query) performSearch(query);
+        });
+
+        // Initialize
+        loadData();
+    </script>
+</body>
+</html>
