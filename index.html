@@ -163,7 +163,7 @@
                 document.getElementById('loading').style.display = 'block';
                 
                 // Adjust path based on where your JSON file is located
-                const response = await fetch('attinger.json');
+                const response = await fetch('./attinger.json');
                 dictionaryData = await response.json();
                 
                 // Filter out empty entries
