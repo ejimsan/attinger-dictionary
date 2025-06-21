@@ -109,27 +109,20 @@
             margin-bottom: 8px;
             font-size: 16px;
         }
-        .content-subsection {
-            margin-bottom: 15px;
-            padding: 10px;
-            background-color: #f8f9fa;
-            border-radius: 5px;
+        .content-text {
+            line-height: 1.6;
+            margin-bottom: 12px;
         }
-        .content-item {
-            margin-bottom: 8px;
-            padding: 5px;
-            background-color: white;
+        .content-type-label {
+            display: inline-block;
+            background: #e9ecef;
+            color: #495057;
+            padding: 2px 6px;
             border-radius: 3px;
-            border-left: 3px solid #e9ecef;
-        }
-        .content-item-type {
-            font-size: 12px;
-            color: #6c757d;
+            font-size: 11px;
             font-weight: bold;
-            margin-bottom: 3px;
-        }
-        .content-item-text {
-            line-height: 1.4;
+            margin-right: 8px;
+            vertical-align: top;
         }
         .composite-item {
             margin-bottom: 12px;
@@ -155,8 +148,9 @@
             border-left: 3px solid #28a745;
         }
         .cross-ref-item, .spelling-item, .subordinate-item {
-            margin-bottom: 8px;
-            padding: 8px;
+            display: inline-block;
+            margin: 2px 6px 2px 0;
+            padding: 4px 8px;
             background-color: #fff3cd;
             border-radius: 3px;
             border-left: 3px solid #ffc107;
@@ -172,6 +166,45 @@
             color: #999;
         }
         
+        /* Citation styling */
+        .citation {
+            color: #007bff;
+            text-decoration: underline;
+            text-decoration-style: dashed;
+            text-decoration-color: #007bff;
+            cursor: help;
+            position: relative;
+        }
+        
+        .citation:hover {
+            background-color: rgba(0, 123, 255, 0.1);
+        }
+        
+        /* Citation popup */
+        .citation-popup {
+            position: absolute;
+            background: white;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 10000;
+            max-width: 400px;
+            min-width: 250px;
+            font-size: 14px;
+            line-height: 1.4;
+            display: none;
+        }
+        
+        .citation-popup-header {
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 8px;
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 5px;
+        }
+        
+        /* Markdown styling */
         .markdown-content h1, .markdown-content h2, .markdown-content h3 {
             color: #2c3e50;
             margin-top: 1em;
@@ -249,20 +282,39 @@
     <div id="resultsInfo" class="results-info"></div>
     <div id="results"></div>
     <div id="loading" class="loading" style="display: none;">Loading dictionary...</div>
+    
+    <!-- Citation popup -->
+    <div id="citationPopup" class="citation-popup"></div>
 
     <script>
         let dictionaryData = [];
+        let citationData = {};
         let searchIndex = null;
         let currentResults = [];
 
-        // Load the JSON data
+        // Load the JSON data and citation data
         async function loadData() {
             try {
                 document.getElementById('loading').style.display = 'block';
                 
-                // Adjust path based on where your JSON file is located
+                // Load dictionary data
                 const response = await fetch('./attinger.json');
                 dictionaryData = await response.json();
+                
+                // Load citation data
+                try {
+                    const citationResponse = await fetch('./attinger_citation.json');
+                    const citationArray = await citationResponse.json();
+                    // Convert array to object for faster lookup
+                    citationData = {};
+                    citationArray.forEach(item => {
+                        citationData[item.abbreviation] = item.bibliography;
+                    });
+                    console.log(`Loaded ${citationArray.length} citation entries`);
+                } catch (citationError) {
+                    console.warn('Could not load citation data:', citationError);
+                    citationData = {};
+                }
                 
                 // Filter out empty entries
                 dictionaryData = dictionaryData.filter(entry => 
@@ -335,7 +387,7 @@
             });
         }
 
-        // Render markdown content
+        // Render markdown content with custom subscript/superscript conversion
         function renderMarkdown(text) {
             if (!text) return '';
             try {
@@ -354,21 +406,45 @@
             }
         }
 
-        // Render content array
-        function renderContentArray(contentArray, title = '') {
+        // Process citations in text
+        function processCitations(text) {
+            if (!text) return '';
+            
+            // Find all potential citations (words that match our citation dictionary)
+            let processedText = text;
+            
+            // Sort citations by length (longest first) to avoid partial matches
+            const sortedCitations = Object.keys(citationData).sort((a, b) => b.length - a.length);
+            
+            sortedCitations.forEach(citation => {
+                // Create a regex that matches the citation as a whole word or followed by punctuation
+                const regex = new RegExp(`\\b${citation.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$|[.,;:!?])`, 'g');
+                processedText = processedText.replace(regex, `<span class="citation" data-citation="${citation}">${citation}</span>`);
+            });
+            
+            return processedText;
+        }
+
+        // Render content as inline text
+        function renderContentInline(contentArray, includeTypeLabels = true) {
             if (!contentArray || contentArray.length === 0) return '';
             
-            return `
-                <div class="content-subsection">
-                    ${title ? `<div class="content-title">${title}</div>` : ''}
-                    ${contentArray.map(item => `
-                        <div class="content-item">
-                            <div class="content-item-type">${item.type || 'GENERAL'}</div>
-                            <div class="content-item-text markdown-content">${renderMarkdown(item.content || '')}</div>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
+            return contentArray.map(item => {
+                let content = item.content || '';
+                
+                // Process citations first
+                content = processCitations(content);
+                
+                // Then render markdown
+                content = renderMarkdown(content);
+                
+                // Add type label if requested
+                const typeLabel = includeTypeLabels && item.type && item.type !== 'GENERAL' 
+                    ? `<span class="content-type-label">${item.type}</span>` 
+                    : '';
+                
+                return `${typeLabel}<span class="content-text">${content}</span>`;
+            }).join(' ');
         }
 
         // Render composites
@@ -386,7 +462,9 @@
                         ${comp.translation_german ? `<div class="translation-row"><span class="translation-label">German:</span> ${comp.translation_german}</div>` : ''}
                     </div>
 
-                    ${renderContentArray(comp.content, 'Content')}
+                    ${comp.content && comp.content.length > 0 ? `
+                        <div class="content-text markdown-content">${renderContentInline(comp.content)}</div>
+                    ` : ''}
 
                     ${comp.subordinate_composites && comp.subordinate_composites.length > 0 ? `
                         <div class="content-title">Subordinate Composites:</div>
@@ -399,14 +477,18 @@
                                     ${subComp.translation_english ? `<div><strong>English:</strong> ${subComp.translation_english}</div>` : ''}
                                     ${subComp.translation_german ? `<div><strong>German:</strong> ${subComp.translation_german}</div>` : ''}
                                 </div>
-                                ${renderContentArray(subComp.content)}
+                                ${subComp.content && subComp.content.length > 0 ? `
+                                    <div class="content-text markdown-content">${renderContentInline(subComp.content)}</div>
+                                ` : ''}
                                 ${subComp.subordinate_composites && subComp.subordinate_composites.length > 0 ? `
                                     <div style="margin-left: 15px; margin-top: 8px;">
                                         ${subComp.subordinate_composites.map(subSubComp => `
                                             <div class="subordinate-composite">
                                                 <strong>${subSubComp.lemma || 'N/A'}</strong>
                                                 ${subSubComp.translation_french ? ` - ${subSubComp.translation_french}` : ''}
-                                                ${renderContentArray(subSubComp.content)}
+                                                ${subSubComp.content && subSubComp.content.length > 0 ? `
+                                                    <div class="content-text markdown-content">${renderContentInline(subSubComp.content)}</div>
+                                                ` : ''}
                                             </div>
                                         `).join('')}
                                     </div>
@@ -418,28 +500,29 @@
             `).join('');
         }
 
-        // Render other arrays (cross-references, spellings, subordinate entries) - FIXED
-        function renderOtherArrays(array, title, className) {
+        // Render other arrays as inline elements
+        function renderOtherArraysInline(array, title, className) {
             if (!array || array.length === 0) return '';
             
+            const items = array.map(item => {
+                if (typeof item === 'string') {
+                    return `<span class="${className}">${processCitations(item)}</span>`;
+                } else if (item && typeof item === 'object') {
+                    if (item.content) {
+                        return `<span class="${className}">${renderContentInline([item], false)}</span>`;
+                    } else {
+                        const displayText = item.lemma || item.text || item.reference || JSON.stringify(item);
+                        return `<span class="${className}">${processCitations(displayText)}</span>`;
+                    }
+                } else {
+                    return `<span class="${className}">N/A</span>`;
+                }
+            }).join(' ');
+
             return `
                 <div class="content-section">
                     <div class="content-title">${title} (${array.length}):</div>
-                    ${array.map(item => {
-                        if (typeof item === 'string') {
-                            return `<div class="${className}">${item}</div>`;
-                        } else if (item && typeof item === 'object') {
-                            if (item.content) {
-                                return renderContentArray([item]);
-                            } else {
-                                // Handle object properly - convert to readable format
-                                const displayText = item.lemma || item.text || item.reference || JSON.stringify(item);
-                                return `<div class="${className}">${displayText}</div>`;
-                            }
-                        } else {
-                            return `<div class="${className}">N/A</div>`;
-                        }
-                    }).join('')}
+                    <div class="content-text">${items}</div>
                 </div>
             `;
         }
@@ -514,7 +597,7 @@
             displayResults(currentResults);
         }
 
-        // Display search results with full entry - REMOVED EXPAND/COLLAPSE
+        // Display search results with inline content
         function displayResults(results) {
             const resultsContainer = document.getElementById('results');
             const resultsInfo = document.getElementById('resultsInfo');
@@ -540,7 +623,12 @@
                             ${entry.translation_german ? `<div class="translation-row"><span class="translation-label">German:</span> ${entry.translation_german}</div>` : ''}
                         </div>
 
-                        ${renderContentArray(entry.content_general, 'General Content')}
+                        ${entry.content_general && entry.content_general.length > 0 ? `
+                            <div class="content-section">
+                                <div class="content-title">General Content:</div>
+                                <div class="content-text markdown-content">${renderContentInline(entry.content_general)}</div>
+                            </div>
+                        ` : ''}
 
                         ${entry.composites && entry.composites.length > 0 ? `
                             <div class="content-section">
@@ -549,12 +637,58 @@
                             </div>
                         ` : ''}
 
-                        ${renderOtherArrays(entry.non_standard_spellings, 'Non-standard Spellings', 'spelling-item')}
-                        ${renderOtherArrays(entry.cross_references, 'Cross References', 'cross-ref-item')}
-                        ${renderOtherArrays(entry.subordinate_entries, 'Subordinate Entries', 'subordinate-item')}
+                        ${renderOtherArraysInline(entry.non_standard_spellings, 'Non-standard Spellings', 'spelling-item')}
+                        ${renderOtherArraysInline(entry.cross_references, 'Cross References', 'cross-ref-item')}
+                        ${renderOtherArraysInline(entry.subordinate_entries, 'Subordinate Entries', 'subordinate-item')}
                     </div>
                 `;
             }).join('');
+
+            // Add citation event listeners after rendering
+            addCitationEventListeners();
+        }
+
+        // Add event listeners for citations
+        function addCitationEventListeners() {
+            const citations = document.querySelectorAll('.citation');
+            const popup = document.getElementById('citationPopup');
+
+            citations.forEach(citation => {
+                citation.addEventListener('mouseenter', (e) => {
+                    const citationKey = e.target.getAttribute('data-citation');
+                    const bibliography = citationData[citationKey];
+                    
+                    if (bibliography) {
+                        popup.innerHTML = `
+                            <div class="citation-popup-header">${citationKey}</div>
+                            <div class="markdown-content">${renderMarkdown(bibliography)}</div>
+                        `;
+                        
+                        // Position popup
+                        const rect = e.target.getBoundingClientRect();
+                        const popupRect = popup.getBoundingClientRect();
+                        
+                        let left = rect.left + window.scrollX;
+                        let top = rect.bottom + window.scrollY + 5;
+                        
+                        // Adjust if popup would go off screen
+                        if (left + 400 > window.innerWidth) {
+                            left = window.innerWidth - 420;
+                        }
+                        if (left < 10) {
+                            left = 10;
+                        }
+                        
+                        popup.style.left = left + 'px';
+                        popup.style.top = top + 'px';
+                        popup.style.display = 'block';
+                    }
+                });
+
+                citation.addEventListener('mouseleave', () => {
+                    popup.style.display = 'none';
+                });
+            });
         }
 
         // Generate suggestions
@@ -625,6 +759,13 @@
         document.getElementById('searchField').addEventListener('change', () => {
             const query = document.getElementById('searchInput').value;
             if (query) performSearch(query);
+        });
+
+        // Hide citation popup when clicking elsewhere
+        document.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('citation')) {
+                document.getElementById('citationPopup').style.display = 'none';
+            }
         });
 
         // Initialize
